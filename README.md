@@ -1,6 +1,12 @@
 # Code for a Data Science challenge
 
-This repository holds my code submission for a data science challenge.
+This repository holds my code submission for a data science challenge. The challenge involves predicting the probability of a failure in a machine within a pre-specified forecast window (of X cycles), from the sensor readings of the machine. 
+
+The initial steps of data cleaning and feature engineering involve calculation of statistics like mean and median from the sensor data from a rolling window of observations. The data is also labeled by giving positive labels to the observations within the failure forecast window and negative labels to all other observations. The data is then split by assigning data from randomly selected machine IDs to training, validation and test sets. This is done to ensure that all data from each unique machine is assigned to one and only one subset.
+
+Then different classification models like logistic regression and decision trees are trained and evaluated on the validation subset using metrics like balanced accuracy, precision, recall, F1 score and ROC-AUC. Accuracy is not used because of the class imbalance (significantly large number of negative examples compared to positive). Out of all the models trained, the best model is selected based on the ROC-AUC score on the validation set. 
+
+Finally, the best model is evaluated on the test set and used for final inference (if features for inference are provided).
 
 # Setup
 
