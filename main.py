@@ -4,23 +4,11 @@ Main script for the data science challenge
 import warnings
 
 warnings.filterwarnings("ignore")
+
 import argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-from sklearn.metrics import (
-    balanced_accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    classification_report,
-    ConfusionMatrixDisplay,
-)
-from sklearn.preprocessing import RobustScaler
-from sklearn.pipeline import Pipeline
 
 from src.data import (
     load_data,
@@ -29,42 +17,24 @@ from src.data import (
     generate_labels,
     generate_train_val_test_idxs,
 )
-from src.model import load_model
-
-
-def train_and_evaluate(
-    model: str,
-    x_train: pd.DataFrame,
-    y_train: pd.Series,
-    x_test: pd.DataFrame,
-    y_test: pd.Series,
-):
-    """Train and evaluate a model."""
-    classifier = load_model(model)
-    pipeline_list = []
-    if model not in ["decision tree", "random forest", "xgb"]:
-        pipeline_list.append(("scaler", RobustScaler()))
-    pipeline_list.append(("classifier", classifier()))
-
-    pipeline = Pipeline(pipeline_list)
-    pipeline.fit(x_train, y_train)
-    y_pred = pipeline.predict(x_test)
-    print(f"Model {model}:")
-    print(
-        f" Balanced accuracy score: {balanced_accuracy_score(y_test,y_pred)*100:.2f}%."
-    )
-    print(f" Precision score: {precision_score(y_test,y_pred)*100:.2f}%.")
-    print(f" Recall score: {recall_score(y_test,y_pred)*100:.2f}%.")
-    print(f" F1 score: {f1_score(y_test,y_pred)*100:.2f}%.")
-    ConfusionMatrixDisplay.from_estimator(pipeline, x_test, y_test)
-    plt.show()
+from src.model import (
+    train_and_evaluate,
+    predict_and_adjust,
+    predict_and_adjust_against_gt,
+    calculate_classification_metrics,
+)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Main script for the data science challenge."
     )
-    parser.add_argument("-p", "--data_path", help="Path to csv/text/excel data file.")
+    parser.add_argument(
+        "--training_data_path", help="Path to csv/text/excel training data file."
+    )
+    parser.add_argument(
+        "--inference_data_path", help="Path to csv/text/excel inference data file."
+    )
     parser.add_argument(
         "--feature_window_size",
         type=int,
@@ -97,42 +67,91 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.data_path is None:
-        raise ValueError("Must supply a data path.")
+    if args.training_data_path is None:
+        raise ValueError("Must supply a training data path.")
 
-    data_path = Path(args.data_path)
-    if not data_path.exists():
-        raise ValueError("Must supply a valid data path.")
+    training_data_path = Path(args.training_data_path)
+
+    if args.inference_data_path is not None:
+        inference_data_path = Path(args.inference_data_path)
+        if not inference_data_path.exists():
+            raise ValueError("Must supply a valid inference data path.")
+
+    if not training_data_path.exists():
+        raise ValueError("Must supply a valid training data path.")
 
     # Set random number generator seed
     np.random.seed(args.seed)
 
     # Load, preprocess and feature engineer data
-    raw = load_data(args.data_path)
+    raw = load_data(training_data_path)
     preprocessed = preprocess_data(raw)
+    machine_id_column = preprocessed[0]
     features = extract_features(preprocessed, args.feature_window_size)
-    features = features.sort_values(by=[0, 1], ascending=True).reset_index(drop=True)
 
     # Get labels
-    labels = generate_labels(features[0], args.failure_window_size)
+    labels = generate_labels(machine_id_column, args.failure_window_size)
 
     # Split data into training, validation and test
     train_idxs, val_idxs, test_idxs = generate_train_val_test_idxs(
-        features[0], args.val_frac, args.test_frac, args.seed
+        machine_id_column, args.val_frac, args.test_frac, args.seed
     )
-
-    features.drop(columns=[0, 1], inplace=True)
-    features.columns = [str(col) for col in features.columns]
 
     x_train, y_train = features.loc[train_idxs, :], labels.loc[train_idxs]
     x_val, y_val = features.loc[val_idxs, :], labels.loc[val_idxs]
     x_test, y_test = features.loc[test_idxs, :], labels.loc[test_idxs]
 
     # Train model
-    models = ["logistic", "svc", "decision tree", "random forest", "xgb", "mlp"]
-
+    models = dict.fromkeys(
+        ["logistic", "svc", "decision tree", "random forest", "xgb", "mlp"],
+        dict.fromkeys(["pipeline", "metrics"]),
+    )
+    best_roc_auc, best_model = 0.0, None
     for model in models:
-        train_and_evaluate(model, x_train, y_train, x_test, y_test)
+        models[model]["pipeline"], models[model]["metrics"] = train_and_evaluate(
+            model,
+            x_train,
+            y_train,
+            x_val,
+            y_val,
+            machine_id_column[val_idxs],
+            display_confusion_matrix=False,
+        )
+        if models[model]["metrics"]["roc_auc"] > best_roc_auc:
+            best_roc_auc = models[model]["metrics"]["roc_auc"]
+            best_model = models[model]["pipeline"]
+
+    # Evaluate best model on test data
+    y_pred = predict_and_adjust_against_gt(
+        best_model, x_test, y_test, machine_id_column[test_idxs]
+    )
+    metrics = calculate_classification_metrics(y_pred, y_test)
+
+    print("-----------------------------------------------------------")
+    print(f"Best model based on ROC-AUC: {best_model['classifier']}:")
+    print("Evaluation on test set:")
+    print(f" Balanced accuracy score: {metrics['bal_acc']*100:.2f}%.")
+    print(f" Precision score: {metrics['precision']*100:.2f}%.")
+    print(f" Recall score: {metrics['recall']*100:.2f}%.")
+    print(f" F1 score: {metrics['f1']*100:.2f}%.")
+    print(f" ROC-AUC score: {metrics['roc_auc']*100:.2f}%.")
+    print("-----------------------------------------------------------")
+
+    # Perform inference on inference data
+    if args.inference_data_path is None:
+        return
+
+    # Load, preprocess and feature engineer data
+    raw = load_data(inference_data_path)
+    preprocessed = preprocess_data(raw)
+    machine_id_column = preprocessed[0]
+    features = extract_features(preprocessed, args.feature_window_size)
+    y_pred = predict_and_adjust(best_model, features, machine_id_column)
+    prediction_df = pd.concat([machine_id_column, preprocessed[1], y_pred], axis=1)
+    prediction_df.columns = ["machine_ID", "cycle", "prediction"]
+    inference_path = inference_data_path.with_name("predictions.csv")
+    prediction_df.to_csv(inference_path, index=False)
+    print(f"Predictions written to {inference_path.resolve()}.")
 
 
 if __name__ == "__main__":

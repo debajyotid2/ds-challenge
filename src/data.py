@@ -45,6 +45,8 @@ def preprocess_data(raw_data: pd.DataFrame) -> pd.DataFrame:
     unchanging_cols = [col for col in non_cat_cols if processed[col].std() <= 0.0001]
     processed.drop(columns=unchanging_cols, inplace=True)
 
+    processed.sort_values(by=[0, 1], ascending=[True, True])
+
     return processed
 
 
@@ -106,10 +108,9 @@ def extract_features(preprocessed_data: pd.DataFrame, window_size: int) -> pd.Da
     it for training a machine learning model.
     """
     features = preprocessed_data.copy(deep=True)
+    features = features.sort_values(by=[0, 1], ascending=True).reset_index(drop=True)
+    features.drop(columns=[0, 1], inplace=True)
     non_cat_cols = get_non_cat_cols(features)
-
-    # Remove time (number of cycles) as a column to use for feature engineering
-    non_cat_cols.remove(1)
 
     # Get rolling statistics
     moving_stats = []
@@ -130,6 +131,8 @@ def extract_features(preprocessed_data: pd.DataFrame, window_size: int) -> pd.Da
             get_relative_change_signal(features[col], features[mean_col], window_size)
         )
     features = pd.concat([features, *rel_change_stats], axis=1)
+
+    features.columns = [str(col) for col in features.columns]
 
     return features
 
@@ -188,9 +191,7 @@ def generate_train_val_test_idxs(
     val_idxs = gather_subset_idxs(val_machine_ids)
     test_idxs = gather_subset_idxs(test_machine_ids)
 
-    # Shuffle before returning
+    # Shuffle the training indices before returning
     rng.shuffle(train_idxs.to_numpy())
-    rng.shuffle(val_idxs.to_numpy())
-    rng.shuffle(test_idxs.to_numpy())
 
     return train_idxs, val_idxs, test_idxs
