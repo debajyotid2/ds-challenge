@@ -146,12 +146,31 @@ def main():
     preprocessed = preprocess_data(raw)
     machine_id_column = preprocessed[0]
     features = extract_features(preprocessed, args.feature_window_size)
+
+    # Generate predictions
     y_pred = predict_and_adjust(best_model, features, machine_id_column)
     prediction_df = pd.concat([machine_id_column, preprocessed[1], y_pred], axis=1)
     prediction_df.columns = ["machine_ID", "cycle", "prediction"]
+
+    # Write predictions to disk.
     inference_path = inference_data_path.with_name("predictions.csv")
     prediction_df.to_csv(inference_path, index=False)
     print(f"Predictions written to {inference_path.resolve()}.")
+
+    # Display results of prediction
+    print("-----------------------------------------------------------")
+    print("Failing machines and the first predicted cycle of failure: ")
+    machine_id_grp = prediction_df.groupby(by="machine_ID")
+    aggregated = machine_id_grp.agg("sum")
+    failing_machines = aggregated[aggregated["prediction"] > 0]
+    for machine_id in failing_machines.index:
+        machine_data = machine_id_grp.get_group(machine_id)
+        filt = machine_data["prediction"] == 1.0
+        first_pos_cycle = machine_data[filt].iloc[0, 1]
+        print(
+            f"Machine ID: {machine_id} will fail within next {int(args.failure_window_size)} cycles of cycle {int(first_pos_cycle)}."
+        )
+    print("-----------------------------------------------------------")
 
 
 if __name__ == "__main__":
