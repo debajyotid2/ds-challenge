@@ -62,7 +62,7 @@ def adjust_predictions_against_gt(
             continue
         first_pos_idx = positive_preds_flr_wdw.index[0]
         last_pos_idx = y_pred_flr_wdw.index[-1]
-        y_pred.loc[first_pos_idx : last_pos_idx + 1] = 1.0
+        y_pred.loc[first_pos_idx:last_pos_idx] = 1.0
     return y_pred
 
 
@@ -119,7 +119,7 @@ def predict_and_adjust(
                 continue
             first_pos_idx = y_pred_machine[pos_pred_mask].index[0]
             last_pos_idx = y_pred_machine.index[-1]
-            y_pred.loc[first_pos_idx : last_pos_idx + 1] = 1.0
+            y_pred.loc[first_pos_idx:last_pos_idx] = 1.0
         return y_pred
 
     y_pred = pipeline.predict(x)
